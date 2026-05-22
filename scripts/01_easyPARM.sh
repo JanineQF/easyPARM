@@ -161,87 +161,24 @@ get_user_input() {
     echo "  Charge Method Selection Menu "
     echo "================================="
     echo "Select the charge calculation method:"
-    echo "1- GAUSSIAN (RESP Charges)"
     echo "2- ORCA (ORCA Fit Charges)"
     echo "3- ORCA (RESP Charges)"
-    echo "4- GAMESS (RESP Charges)"
-    echo "5- GAMESS (GAMESS Fit Charges)"
-    echo "6- PSI4 (RESP Charges)"
-    #echo "7- PSI4 (OFF)"
-    charge_output=$(get_valid_input "Enter your choice: " "1 2 3 4 5 6 7")
+    charge_output=$(get_valid_input "Enter your choice: " "2 3")
 
-    if [ "$charge_output" -eq 1 ]; then
-        get_gaussian_input
-    elif [ "$charge_output" -eq 2 ]; then
+
+    if [ "$charge_output" -eq 2 ]; then
         get_orca_input
     elif [ "$charge_output" -eq 3 ]; then
         get_orca_input
-    elif [ "$charge_output" -eq 4 ]; then
-        get_gamess_input
-    elif [ "$charge_output" -eq 5 ]; then
-        get_gamess_input
-    elif [ "$charge_output" -eq 6 ]; then
-        get_psi4_input
-    elif [ "$charge_output" -eq 7 ]; then
-        get_psi4_input
     fi
 }
 
-get_gaussian_input() {
-    # Get input format for output of gaussian
-    echo " "
-    echo "================================="
-    echo "  Charge Output Selection Menu "
-    echo "================================="
-    echo "Please select the input format:"
-    echo "1- Gaussian Output (.log file)"
-    echo "2- Resp (.gesp file)"
-    input_format=$(get_valid_input "Enter your choice: " "1 2")
-
-    # Map input format to appropriate flag
-    case $input_format in
-        1) input_form="gout";;
-        2) input_form="gesp";;
-    esac
-
-    # Get charge method
-    echo " "
-    echo "================================="
-    echo "  Charge Method Selection Menu "
-    echo "================================="
-    echo "Please select the charge method (recommended: RESP): "
-    echo "1- RESP (resp)"
-    echo "2- Mulliken (mul)"
-    echo "3- ESP (esp)"
-    echo "4- AM1-BCC (bcc)"
-    charge_method=$(get_valid_input "Enter your choice: " "1 2 3 4")
-
-    # Map charge method to appropriate flag
-    case $charge_method in
-        1) method="resp";;
-        2) method="mul";;
-        3) method="esp";;
-        4) method="bcc";;
-    esac
-
-    get_atom_type
-    run_antechamber_gaussian
-}
 
 get_orca_input() {
     get_atom_type
     run_antechamber_orca
 }
 
-get_gamess_input() {
-    get_atom_type
-    run_antechamber_gamess
-}
-
-get_psi4_input() {
-    get_atom_type
-    run_antechamber_psi4
-}
 
 get_atom_type() {
     echo " "
@@ -262,80 +199,6 @@ get_atom_type() {
     esac
 }
 
-run_antechamber_gaussian() {
-    while true; do
-        echo " "
-        read -p "Please provide the charge output file (e.g., .log, .gesp): " charge_data
-        
-        # Ensure the charge data file is found in RUN_DIR
-        if [ ! -f "$RUN_DIR/$charge_data" ]; then
-            echo "Charge data file not found in $RUN_DIR. Please check the file name and try again."
-            continue
-        fi
-
-        # First antechamber attempt
-        antechamber -i "$RUN_DIR/$charge_data" -fi "$input_form" -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -c "$method" -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -j 5 -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1 
-        
-	if [[ "$atom_type" -eq 2 || "$atom_type" -eq 3 ]]; then
-		
-		python3 "$SCRIPT_DIR/03_correct_mol2.py" "$RUN_DIR"
-
-		python3 "$SCRIPT_DIR/atomtype_helper.py" "$RUN_DIR/COMPLEX.mol2" "$RUN_DIR/distance_type.dat" "$RUN_DIR/COMREF.mol2" > "$RUN_DIR/temp.dat" 2>&1
-		python3 "$SCRIPT_DIR/atomtype_detector.py" "$RUN_DIR/COMREF.mol2" "$RUN_DIR/distance.dat" "$RUN_DIR/angle.dat" > "$RUN_DIR/temp.dat" 2>&1 
-		if [ -f "$RUN_DIR/easyPARM.mol2" ]; then
-			cp "$RUN_DIR/easyPARM.mol2" "$RUN_DIR/COMPLEX.mol2"
-		fi
-	fi
-	# Convert XYZ to PDB
-        python3 "$SCRIPT_DIR/xyz_to_pdb.py" "$RUN_DIR/$xyz_file" "$RUN_DIR/COMPLEX.pdb"
-        
-        # Revise Atom Type
-        python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-
-        # Additional processing steps to ensure that COMPLEX.mol2 is correct
-        if [ ! -f "$RUN_DIR/limited_data.dat" ]; then
-            if [ -f "$RUN_DIR/no_metal.dat" ]; then
-                antechamber -i "$RUN_DIR/$charge_data" -fi "$input_form" -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -c "$method" -s 2 -rn mol -nc "$charge_total" -at "$at_type" -m "$multi_total" > "$RUN_DIR/temp.dat" 2>&1
-            else
-                python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-                antechamber -i "$RUN_DIR/mol.pdb" -fi pdb -o "$RUN_DIR/ONE.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1
-                python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-                if [ -f "$RUN_DIR/ONE.mol2" ]; then
-                    cp "$RUN_DIR/COMPLEX_modified.mol2" "$RUN_DIR/COMPLEX.mol2"
-                fi
-        	antechamber -i "$RUN_DIR/$charge_data" -fi "$input_form" -o "$RUN_DIR/ONE2.mol2" -fo mol2 -c "$method" -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1 
-		if [ -f "$RUN_DIR/ONE2.mol2" ]; then
-                    cp "$RUN_DIR/ONE2.mol2" "$RUN_DIR/COMPLEX.mol2"
-                fi
-
-            fi
-        else 
-            break 
-        fi
-
-        # Check if COMPLEX.mol2 was generated after all attempts
-        if [ ! -f "$RUN_DIR/COMPLEX.mol2" ]; then
-            echo "  "
-	    echo "Failed to generate COMPLEX.mol2 after multiple attempts."
-	    echo -e "\n\033[0;31mPlease verify the availability of Antechamber.\033[0m"
-	    echo " " 
-            retry=$(get_valid_input "Would you like to provide a different charge output file? (y/n)" "y n")
-            case "$retry" in
-                [yY]) 
-                    echo "Retrying with a different charge output file."
-                    continue
-                    ;;
-                [nN]) 
-                    echo "Exiting due to failed antechamber command."
-                    exit 1
-                    ;;
-            esac
-        else
-            echo "Antechamber command executed successfully. "
-            break
-        fi
-    done
-}
 
 run_antechamber_orca() {
     # Convert xyz to pdb
@@ -451,220 +314,7 @@ run_antechamber_orca() {
     
     fi
 }
-run_antechamber_gamess() {
-    # Convert xyz to pdb
-    if [ -f "$SCRIPT_DIR/xyz_to_pdb.py" ]; then
-        python3 "$SCRIPT_DIR/xyz_to_pdb.py" "$RUN_DIR/$xyz_file" "$RUN_DIR/COMPLEX.pdb"
-    else
-        echo "Script xyz_to_pdb.py not found in $SCRIPT_DIR. Exiting."
-        exit 1
-    fi
-    
-    # Check if the script was successful
-    if [ $? -ne 0 ]; then
-        echo "Failed to execute xyz_to_pdb.py. Exiting."
-        exit 1
-    fi
-    
-    # Read charge output
-    while true; do
-	echo " "
-        if [ "$charge_output" -eq 4 ]; then
-		read -p "Please provide the charge output file ( .dat): " charge_data
-		if [[ ! "$charge_data" =~ \.dat$ ]]; then
-			echo "Error: The file must have a .dat extension. Please try again."
-			continue
-		fi
-		if [ ! -f "$RUN_DIR/$charge_data" ]; then
-			echo "Charge data file not found in $RUN_DIR. Please check the file name and try again."
-			continue
-		fi
-	elif [ "$charge_output" -eq 5 ]; then
-		read -p "Please provide the charge output file ( .log): " charge_data
-		if [[ ! "$charge_data" =~ \.log$ ]]; then
-			echo "Error: The file must have a .log extension. Please try again."
-			continue
-		fi
-		if [ ! -f "$RUN_DIR/$charge_data" ]; then
-			echo "Charge data file not found in $RUN_DIR. Please check the file name and try again."
-			continue
-		fi
 
-	fi
-        break
-    done
- 
-    # First antechamber attempt
-    antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -at "$at_type" -m "$multi_total" -dr no -j 5 > "$RUN_DIR/temp.dat" 2>&1
-    
-    # Apply our approach to detect the atom type.
-    if [[ "$atom_type" -eq 2 || "$atom_type" -eq 3 ]]; then
-
-	    # Revise the mol2
-	    python3 "$SCRIPT_DIR/03_correct_mol2.py" "$RUN_DIR"
-	    # 
-	    python3 "$SCRIPT_DIR/atomtype_helper.py" "$RUN_DIR/COMPLEX.mol2" "$RUN_DIR/distance_type.dat" "$RUN_DIR/ZEMA.mol2" > "$RUN_DIR/temp.dat" 2>&1
-	    python3 "$SCRIPT_DIR/atomtype_detector.py" "$RUN_DIR/ZEMA.mol2" "$RUN_DIR/distance.dat" "$RUN_DIR/angle.dat" > "$RUN_DIR/temp.dat" 2>&1 
-	    if [ -f "$RUN_DIR/easyPARM.mol2" ]; then
-		    mv "$RUN_DIR/easyPARM.mol2" "$RUN_DIR/COMPLEX.mol2"
-	    fi
-    fi
-      
-    # Revise Atom Type
-    python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-    
-    # Additional processing steps
-    if [ ! -f "$RUN_DIR/limited_data.dat" ]; then
-        if [ -f "$RUN_DIR/no_metal.dat" ]; then
-            antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -s 2 -rn mol -m "$multi_total" -nc "$charge_total" -at "$at_type" > "$RUN_DIR/temp.dat" 2>&1
-        else 
-            python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-            antechamber -i "$RUN_DIR/mol.pdb" -fi pdb -o "$RUN_DIR/ONE.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1
-            python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-            if [ -f "$RUN_DIR/ONE.mol2" ]; then
-                mv "$RUN_DIR/COMPLEX_modified.mol2" "$RUN_DIR/COMPLEX.mol2"
-            fi
-	    antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/ONE2.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1
-	    if [ -f "$RUN_DIR/ONE2.mol2" ]; then
-                    cp "$RUN_DIR/ONE2.mol2" "$RUN_DIR/COMPLEX.mol2"
-            fi
-        fi
-    else 
-        break 
-    fi
-    
-    # Check if COMPLEX.mol2 was generated after all attempts
-    if [ ! -f "$RUN_DIR/COMPLEX.mol2" ]; then
-        echo " "
-	echo "Failed to generate COMPLEX.mol2 after multiple attempts. "
-	echo -e "\n\033[0;31mPlease verify the availability of Antechamber.\033[0m"
-	echo " " 
-
-        retry=$(get_valid_input "Would you like to provide a different charge output file? (y/n)" "y n")
-        case "$retry" in
-            [yY]) 
-                echo "Retrying with a different charge output file..."
-                run_antechamber_orca
-                return
-                ;;
-            [nN]) 
-                echo "Exiting due to failed antechamber command."
-                exit 1
-                ;;
-        esac
-    else
-        echo "Antechamber command executed successfully. "
-    fi
-    
-    # Update mol2 file with gamess charges (if selected)
-    if [ "$charge_output" -eq 5 ]; then
-	awk '/NET CHARGES:/,/RMS DEVIATION IS/ {
-		if ($1 ~ /^[A-Z]/ && $3 ~ /^-?[0-9]/)
-    			print $2
-	}' "$RUN_DIR/$charge_data" > "$RUN_DIR/charges.dat"
-        cp "$RUN_DIR/charges.dat" "$RUN_DIR/charges.chg"
-       	python3 "$SCRIPT_DIR/Retrieve_RESP_Charges.py"
-    fi
-
-}
-
-run_antechamber_psi4() {
-    
-     if [ "$charge_output" -eq 6 ]; then  
-	    if [ -f "$SCRIPT_DIR/PSI4.py" ]; then
-		python3 "$SCRIPT_DIR/PSI4.py"
-
-	    else
-		echo "Script PSI4.py not found in $SCRIPT_DIR. Exiting."
-		exit 1
-	    fi
-    fi
-
-    # Convert xyz to pdb
-    cp "$RUN_DIR/optimized.xyz" "$RUN_DIR/COMPLEX.xyz"
-    if [ -f "$SCRIPT_DIR/xyz_to_pdb.py" ]; then
-        python3 "$SCRIPT_DIR/xyz_to_pdb.py" "$RUN_DIR/COMPLEX.xyz" "$RUN_DIR/COMPLEX.pdb"
-    else
-        echo "Script xyz_to_pdb.py not found in $SCRIPT_DIR. Exiting."
-        exit 1
-    fi
-    
-    # Check if the script was successful
-    if [ $? -ne 0 ]; then
-        echo "Failed to execute xyz_to_pdb.py. Exiting."
-        exit 1
-    fi
-     
-    # First antechamber attempt
-    antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -at "$at_type" -m "$multi_total" -dr no -j 5 > "$RUN_DIR/temp.dat" 2>&1
-    
-    # Apply our approach to detect the atom type.
-    if [[ "$atom_type" -eq 2 || "$atom_type" -eq 3 ]]; then
-
-	    # Revise the mol2
-	    python3 "$SCRIPT_DIR/03_correct_mol2.py" "$RUN_DIR"
-	    # 
-	    python3 "$SCRIPT_DIR/atomtype_helper.py" "$RUN_DIR/COMPLEX.mol2" "$RUN_DIR/distance_type.dat" "$RUN_DIR/ZEMA.mol2" > "$RUN_DIR/temp.dat" 2>&1
-	    python3 "$SCRIPT_DIR/atomtype_detector.py" "$RUN_DIR/ZEMA.mol2" "$RUN_DIR/distance.dat" "$RUN_DIR/angle.dat" > "$RUN_DIR/temp.dat" 2>&1 
-	    if [ -f "$RUN_DIR/easyPARM.mol2" ]; then
-		    mv "$RUN_DIR/easyPARM.mol2" "$RUN_DIR/COMPLEX.mol2"
-	    fi
-    fi
-      
-    # Revise Atom Type
-    python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-    
-    # Additional processing steps
-    if [ ! -f "$RUN_DIR/limited_data.dat" ]; then
-        if [ -f "$RUN_DIR/no_metal.dat" ]; then
-            antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/COMPLEX.mol2" -fo mol2 -s 2 -rn mol -m "$multi_total" -nc "$charge_total" -at "$at_type" > "$RUN_DIR/temp.dat" 2>&1
-        else 
-            python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-            antechamber -i "$RUN_DIR/mol.pdb" -fi pdb -o "$RUN_DIR/ONE.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1
-            python3 "$SCRIPT_DIR/Revise_Atom_Type.py" > "$RUN_DIR/temp.dat"
-            if [ -f "$RUN_DIR/ONE.mol2" ]; then
-                mv "$RUN_DIR/COMPLEX_modified.mol2" "$RUN_DIR/COMPLEX.mol2"
-            fi
-	    antechamber -i "$RUN_DIR/COMPLEX.pdb" -fi pdb -o "$RUN_DIR/ONE2.mol2" -fo mol2 -s 2 -rn mol -nc "$charge_total" -m "$multi_total" -at "$at_type" -dr no > "$RUN_DIR/temp.dat" 2>&1
-	    if [ -f "$RUN_DIR/ONE2.mol2" ]; then
-		    cp "$RUN_DIR/ONE2.mol2" "$RUN_DIR/COMPLEX.mol2"
-            fi
-        fi
-    else 
-        break 
-    fi
-    
-    # Check if COMPLEX.mol2 was generated after all attempts
-    if [ ! -f "$RUN_DIR/COMPLEX.mol2" ]; then
-        echo " "
-	echo "Failed to generate COMPLEX.mol2 after multiple attempts. "
-	echo -e "\n\033[0;31mPlease verify the availability of Antechamber.\033[0m"
-	echo " " 
-
-        retry=$(get_valid_input "Would you like to provide a different charge output file? (y/n)" "y n")
-        case "$retry" in
-            [yY]) 
-                echo "Retrying with a different charge output file..."
-                run_antechamber_orca
-                return
-                ;;
-            [nN]) 
-                echo "Exiting due to failed antechamber command."
-                exit 1
-                ;;
-        esac
-    else
-        echo "Antechamber command executed successfully. "
-    fi
-    
-    # Update mol2 file with PSI4 charges
-    if [[ "$charge_output" -eq 6 || "$charge_output" -eq 7 ]]; then
-	awk '{print $3}' "$RUN_DIR/resp_charges.dat" > "$RUN_DIR/charges.dat"
-        cp "$RUN_DIR/charges.dat" "$RUN_DIR/charges.chg"
-       	python3 "$SCRIPT_DIR/Retrieve_RESP_Charges.py"
-    fi
-
-}
 
 # Main execution
 get_user_input
