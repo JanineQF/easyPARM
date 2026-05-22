@@ -26,6 +26,19 @@ import shutil
 import os 
 
 def extract_atom_types_from_mol2(file_path):
+    """
+    Parse a MOL2 file and extract atom type assignments.
+    
+    Reads the @<TRIPOS>ATOM section of a MOL2 file and builds a dictionary
+    mapping atom IDs (int) to their GAFF2/AMBER atom type strings (column 6).
+    
+    Args:
+        file_path (str): Path to the MOL2 file to parse.
+        
+    Returns:
+        dict: {atom_id: atom_type} mapping, e.g. {1: 'ns', 2: 'hn', 133: 'Mn'}.
+              Returns empty dict on error.
+    """
     try:
         with open(file_path, 'r') as file:
             lines = file.readlines()
@@ -54,6 +67,20 @@ def extract_atom_types_from_mol2(file_path):
 
 #Read atom type mappings from library file
 def read_aminofb15_lib(file_path):
+    """
+    Read atom type mappings from an AMBER force field library (.lib) file.
+    
+    Parses the '!entry.<RESNAME>.unit.atoms table' sections to extract
+    the mapping from atom names to their force field atom types for each
+    standard residue (e.g., HID: {'N': 'N', 'CA': 'XC', 'CB': 'CT', ...}).
+    
+    Args:
+        file_path (str): Path to the .lib file (e.g., ff19SB.lib, fb15.lib).
+        
+    Returns:
+        dict: Nested dict {residue_name: {atom_name: atom_type}}.
+              Returns empty dict on error.
+    """
     residue_atom_types = {}
     current_residue = None
     
@@ -81,6 +108,19 @@ def read_aminofb15_lib(file_path):
 
 #Write initial PDB with MOL2 atom types
 def write_pdb_with_mol2_types(structure, output_file, atom_types):
+    """
+    Write a PDB file where the atom name field contains MOL2 atom types.
+    
+    Iterates through a BioPython Structure object and writes each atom
+    in PDB format, but replaces the standard atom name (columns 13-16)
+    with the corresponding GAFF2 atom type from the MOL2 file. This creates
+    a hybrid PDB used as an intermediate for atom type reassignment.
+    
+    Args:
+        structure: BioPython Structure object containing the extracted residues.
+        output_file (str): Path to write the output PDB (e.g., 'QM.pdb').
+        atom_types (dict): {sequential_atom_id: mol2_atom_type} from extract_atom_types_from_mol2().
+    """
     atom_counter = 1
     with open(output_file, 'w') as f:
         for model in structure:
@@ -104,6 +144,26 @@ def write_pdb_with_mol2_types(structure, output_file, atom_types):
 
 #Update atom types in QM.pdb based on REFQM.pdb and library
 def update_atom_types_from_library(qm_pdb, ref_pdb, lib_types, terminal_info):
+    """
+    Replace MOL2 atom types in QM.pdb with protein FF atom types from the library.
+    
+    For each atom in QM.pdb, looks up its residue name and atom name from REFQM.pdb
+    (which has the original PDB atom names), then finds the corresponding protein FF
+    atom type (e.g., ff19SB type) from the library. Handles N/C-terminal residues by
+    prepending 'N' or 'C' to the residue name for library lookup.
+    
+    Only standard amino acid atoms that exist in the library get updated; non-standard
+    atoms (metals, ligands) retain their original MOL2/GAFF2 types.
+    
+    Note: Uses zip(qm_lines, ref_lines) which assumes both files have identical line
+    counts. REFQM.pdb may contain TER/END records that cause misalignment.
+    
+    Args:
+        qm_pdb (str): Path to QM.pdb (will be overwritten with updated types).
+        ref_pdb (str): Path to REFQM.pdb (reference with original atom names).
+        lib_types (dict): {residue_name: {atom_name: ff_type}} from read_aminofb15_lib().
+        terminal_info (dict): {(chain_id, res_id): 'NTERM'|'CTERM'} for terminal residues.
+    """
     with open(ref_pdb, 'r') as ref_file:
         ref_lines = ref_file.readlines()
     
@@ -153,6 +213,22 @@ def update_atom_types_from_library(qm_pdb, ref_pdb, lib_types, terminal_info):
 #Update atom types in MOL2 file using atom types from QM.pdb while preserving the original formatting.
 def update_mol2_with_qm_types(mol2_file, qm_pdb, output_mol2):
 
+    """
+    Update the atom type column in a MOL2 file using types from QM.pdb.
+    
+    After QM.pdb has been updated with protein FF atom types (via 
+    update_atom_types_from_library), this function propagates those types back
+    into the MOL2 file. Standard amino acid atoms get ff19SB types while
+    non-standard atoms keep their GAFF2 types.
+    
+    The output MOL2 (COMPLEX_updated.mol2) is a hybrid: protein FF types for
+    standard residue atoms, GAFF2 types for the metal center and ligands.
+    
+    Args:
+        mol2_file (str): Path to input MOL2 (NEW_COMPLEX.mol2).
+        qm_pdb (str): Path to QM.pdb with updated atom types.
+        output_mol2 (str): Path for output MOL2 (COMPLEX_updated.mol2).
+    """
     # Read QM.pdb atom types
     qm_atom_types = {}
     with open(qm_pdb, 'r') as qm_file:
@@ -211,13 +287,28 @@ def update_mol2_with_qm_types(mol2_file, qm_pdb, output_mol2):
         # Write updated MOL2 file
         with open(output_mol2, 'w') as output_file:
             output_file.writelines(updated_mol2_lines)
-         
+            print("COMPLEX_updated.mol2 has been created with updated atom types.")
+            
     except Exception as e:
         print(f"Error updating MOL2 file: {e}")
 
 #Identify N-terminal and C-terminal residues for each chain.
 def identify_terminal_residues(structure, standard_residues):
     
+    """
+    Identify N-terminal and C-terminal residues in each chain.
+    
+    For each chain in the structure, finds the first and last standard amino
+    acid residues and marks them as NTERM/CTERM. This information is used to
+    look up terminal-specific atom types from the library (e.g., NHID, CHID).
+    
+    Args:
+        structure: BioPython Structure object.
+        standard_residues (set): Set of recognized standard residue names.
+        
+    Returns:
+        dict: {(chain_id, residue_id_tuple): 'NTERM'|'CTERM'} for terminal residues.
+    """
     terminal_info = {}
 
     # Base residue names (without N/C prefix)
@@ -243,6 +334,30 @@ def identify_terminal_residues(structure, standard_residues):
 
 def analyze_and_extract_metal_site(input_pdb, mol2_file="NEW_COMPLEX.mol2", lib_file="amber_refernce.lib", 
                                    output_pdb="QM.pdb", distance_cutoff=2.5):
+    """
+    Core function: analyze metal coordination and extract the metal site from the protein.
+    
+    This is the main analysis step that:
+    1. Parses the protein PDB and identifies all metal atoms
+    2. Finds residues within 2.5 Å of each metal (coordination shell)
+    3. Finds standard residues covalently bonded (<1.9 Å) to non-standard coordinating residues
+    4. Rebuilds a new structure containing only the extracted residues (preserving order)
+    5. Writes REFQM.pdb (reference with original atom names) and QM.pdb (with MOL2 types)
+    6. Updates QM.pdb atom types using the protein FF library for standard residue atoms
+    7. Writes fixed_charges.dat listing backbone atoms (N, CA, C, O) that need fixed charges
+    
+    Args:
+        input_pdb (str): Path to metalloprotein_easyPARM.pdb (cleaned protein structure).
+        mol2_file (str): Path to NEW_COMPLEX.mol2 (full QM cluster with GAFF2 types/charges).
+        lib_file (str): Basename of the FF library file (looked up in script directory).
+        output_pdb (str): Path for QM.pdb output.
+        distance_cutoff (float): Metal coordination distance cutoff in Å (default 2.5).
+        
+    Returns:
+        tuple: (metal_coordination dict, terminal_info dict)
+            - metal_coordination: {metal_key: {'metal_position': coord, 'coordinating_residues': [...]}}
+            - terminal_info: {(chain_id, res_id): 'NTERM'|'CTERM'}
+    """
     metals=['MN', 'FE', 'CO', 'NI', 'CU', 'ZN', 'MO', 'TC', 'RU', 'RH', 'PD', 'AG', 'W', 'RE', 'OS', 'IR', 'PT', 'AU', 'NA', 'K', 'LI', 'RB', 'CS', 'MG', 'CA', 'SR', 'BA', 'V', 'CR', 'CD', 'HG', 'AL', 'GA', 'IN', 'SN', 'PB', 'BI', 'LA', 'CE', 'PR', 'ND', 'PM', 'SM', 'EU', 'GD', 'TB', 'DY', 'HO', 'ER', 'TM', 'YB', 'LU', 'FE2', 'FE3', 'FE4', 'CU1', 'CU2', 'MN2', 'MN3', 'MN4', 'CO2', 'CO3', 'NI2', 'NI3', 'V2', 'V3', 'V4', 'V5']    
     # Define standard amino acid residues
     standard_residues = {
@@ -431,6 +546,18 @@ def analyze_and_extract_metal_site(input_pdb, mol2_file="NEW_COMPLEX.mol2", lib_
 
 #Extracts all residue names from the given PDB file.
 def get_existing_residues(pdb_file):
+    """
+    Extract all unique residue names from a PDB file.
+    
+    Used to check for name collisions when generating unique 3-character
+    residue names for metal-coordinating standard residues.
+    
+    Args:
+        pdb_file (str): Path to a PDB file (typically metalloprotein_easyPARM.pdb).
+        
+    Returns:
+        set: Set of residue name strings found in the file.
+    """
     existing_residues = set()
     with open(pdb_file, 'r') as f:
         for line in f:
@@ -442,6 +569,24 @@ def get_existing_residues(pdb_file):
 #Generates a unique residue name based on base_name. Increments a counter until a unique name is found.
 
 def generate_unique_residue_name(base_name, existing_residues, residue_type_count):
+    """
+    Generate a unique 3-character residue name that doesn't conflict with existing names.
+    
+    Uses the first 2 characters of the original residue name as a base (e.g., 'HI' for HID,
+    'CY' for CYS) and appends/prepends digits in three patterns:
+      - Pattern 1: HI1, HI2, ..., HI9
+      - Pattern 2: 1HI, 2HI, ..., 9HI  
+      - Pattern 3: H1I, H2I, ..., H9I
+    Cycles through patterns until a unique name is found.
+    
+    Args:
+        base_name (str): 2-character base (e.g., 'HI', 'CY', 'AS', 'GL').
+        existing_residues (set): Names already in use (modified in-place when new name added).
+        residue_type_count (dict): Counter for each base_name (modified in-place).
+        
+    Returns:
+        str: Unique 3-character residue name (e.g., 'HI1', '2CY', 'A1S').
+    """
     # Initialize counter if not already done
     if base_name not in residue_type_count:
         residue_type_count[base_name] = 1
@@ -487,6 +632,28 @@ def extract_non_standard_residues_from_ref(ref_pdb, output_pdb="part_QM.pdb", ou
                                            standard_residues=None, all_residues_pdb="metalloprotein_easyPARM.pdb",
                                            terminal_info=None):
     
+    """
+    Split the extracted metal site into non-standard (metal+ligand) and standard (amino acid) parts.
+    
+    Reads REFQM.pdb and separates residues into:
+    - Non-standard residues (metal centers, non-AA ligands) → part_QM.pdb + part_QM.xyz
+    - Standard amino acid residues near metals → individual PDB/XYZ files with unique names
+      (e.g., HI1.pdb, HI1.xyz, CY1.pdb, CY1.xyz)
+    
+    Standard residues are renamed to unique 3-char names to avoid conflicts with the protein
+    FF definitions (since they will get custom charges from the QM calculation).
+    
+    Args:
+        ref_pdb (str): Path to REFQM.pdb (extracted metal site with original names).
+        output_pdb (str): Path for non-standard residues PDB output (part_QM.pdb).
+        output_xyz (str): Path for non-standard residues XYZ output (part_QM.xyz).
+        standard_residues (set): Optional set of standard residue names.
+        all_residues_pdb (str): Full protein PDB for checking name collisions.
+        terminal_info (dict): Terminal residue information.
+        
+    Returns:
+        dict: {(resname, chain, resnum): new_3char_name} mapping for renamed standard residues.
+    """
     metals=['MN', 'FE', 'CO', 'NI', 'CU', 'ZN', 'MO', 'TC', 'RU', 'RH', 'PD', 'AG', 'W', 'RE', 'OS', 'IR', 'PT', 'AU', 'NA', 'K', 'LI', 'RB', 'CS', 'MG', 'CA', 'SR', 'BA', 'V', 'CR', 'CD', 'HG', 'AL', 'GA', 'IN', 'SN', 'PB', 'BI', 'LA', 'CE', 'PR', 'ND', 'PM', 'SM', 'EU', 'GD', 'TB', 'DY', 'HO', 'ER', 'TM', 'YB', 'LU', 'FE2', 'FE3', 'FE4', 'CU1', 'CU2', 'MN2', 'MN3', 'MN4', 'CO2', 'CO3', 'NI2', 'NI3', 'V2', 'V3', 'V4', 'V5']
 
     element_converter = {
@@ -681,7 +848,7 @@ def extract_non_standard_residues_from_ref(ref_pdb, output_pdb="part_QM.pdb", ou
             x = float(line[30:38])
             y = float(line[38:46])
             z = float(line[46:54])
-            element = line[76:78].strip()
+            element = line.split()[-1]
             if not element:
                 alpha_chars = ''.join(c for c in atom_name if c.isalpha())
                 element = (alpha_chars[:2].upper() if len(alpha_chars) >= 2 else alpha_chars[0].upper()) if alpha_chars else '' 
@@ -708,7 +875,7 @@ def extract_non_standard_residues_from_ref(ref_pdb, output_pdb="part_QM.pdb", ou
             x = float(line[30:38])
             y = float(line[38:46])
             z = float(line[46:54])
-            element = line[76:78].strip()
+            element = line.split()[-1]
             if not element:
                 alpha_chars = ''.join(c for c in atom_name if c.isalpha())
                 element = (alpha_chars[:2].upper() if len(alpha_chars) >= 2 else alpha_chars[0].upper()) if alpha_chars else '' 
@@ -727,6 +894,22 @@ def extract_non_standard_residues_from_ref(ref_pdb, output_pdb="part_QM.pdb", ou
 #Generate a PDB file containing all residues except those in part_QM.pdb,
 #with updated residue names for metal-coordinating residues.    
 def generate_nonstand_pdb(input_pdb, part_qm_pdb, output_pdb="nonstand.pdb"):
+    """
+    Generate the main protein PDB for tleap with metal region removed and residues renamed.
+    
+    Creates nonstand.pdb by:
+    1. Excluding all residues that appear in part_QM.pdb (the metal+non-standard part)
+    2. Renaming metal-coordinating standard residues to their unique names (HI1, CY1, etc.)
+       by scanning for 3-char-named PDB files in the working directory
+    
+    The output is used as input for tleap to build the full protein topology, where
+    the renamed residues are loaded as custom residues with QM-derived charges.
+    
+    Args:
+        input_pdb (str): Path to metalloprotein_easyPARM.pdb (full protein).
+        part_qm_pdb (str): Path to part_QM.pdb (residues to exclude).
+        output_pdb (str): Output path (default: nonstand.pdb).
+    """
     try:
         # First get the mapping from HI*.pdb, CY*.pdb files to know which residues to rename
         rename_mapping = {}
@@ -796,6 +979,22 @@ def generate_nonstand_pdb(input_pdb, part_qm_pdb, output_pdb="nonstand.pdb"):
 
 #Extract charges and atom types for atoms in PDB files from MOL2 file.    
 def extract_qm_charges(ref_pdb, mol2_file, residue_name_mapping=None):
+    """
+    Extract charges and atom types from the MOL2 file for each split-out residue.
+    
+    For each PDB file (part_QM.pdb and each renamed standard residue like HI1.pdb),
+    looks up the corresponding atom IDs in NEW_COMPLEX.mol2 and extracts their charges
+    and atom types. Writes:
+    - charge_qm.dat: charges for the metal+non-standard part
+    - charge_HI1.dat, charge_CY1.dat, etc.: charges for each renamed standard residue
+    - charges_all.dat: index mapping mol2 files to charge files
+    - qm.xyz: coordinates of the metal+non-standard part (for Seminario method)
+    
+    Args:
+        ref_pdb (str): Path to REFQM.pdb (not directly used, but defines atom ordering context).
+        mol2_file (str): Path to NEW_COMPLEX.mol2 (source of charges and coordinates).
+        residue_name_mapping (dict): {(resname, chain, resnum): new_name} from extract_non_standard_residues_from_ref().
+    """
     if residue_name_mapping is None:
         residue_name_mapping = {}
     
@@ -830,15 +1029,17 @@ def extract_qm_charges(ref_pdb, mol2_file, residue_name_mapping=None):
         for pdb_info in pdb_files:
             pdb_file, charge_output, xyz_output, create_xyz = pdb_info
             
-            # Read atom IDs and residue information from PDB
+            # Read atom IDs, atom names, and residue information from PDB
             qm_atom_ids = []
             atom_residue_mapping = {}
+            atom_pdb_names = {}
             
             with open(pdb_file, 'r') as pdb:
                 for line in pdb:
                     if line.startswith(("ATOM", "HETATM")):
                         try:
                             atom_id = int(line[6:11].strip())
+                            pdb_atom_name = line[12:16].strip()
                             resname = line[17:20].strip()
                             chain = line[21:22].strip()
                             resnum = int(line[22:26])
@@ -849,6 +1050,7 @@ def extract_qm_charges(ref_pdb, mol2_file, residue_name_mapping=None):
                             
                             qm_atom_ids.append(atom_id)
                             atom_residue_mapping[atom_id] = new_resname
+                            atom_pdb_names[atom_id] = pdb_atom_name
                         except ValueError as e:
                             print(f"Warning: Could not parse atom ID from PDB line: {line.strip()}")
                             continue
@@ -897,12 +1099,13 @@ def extract_qm_charges(ref_pdb, mol2_file, residue_name_mapping=None):
                             print(f"Warning: Could not parse MOL2 line: {line.strip()}")
                             continue
             
-            # Write charges to output file
+            # Write charges to output file (charge, atom_type, PDB_atom_name)
             with open(charge_output, 'w') as charge_file:
                 for atom_id in qm_atom_ids:
                     if atom_id in charges_and_types:
                         data = charges_and_types[atom_id]
-                        charge_file.write(f"{data['charge']:.6f} {data['atom_type']}\n")
+                        pdb_name = atom_pdb_names.get(atom_id, "???")
+                        charge_file.write(f"{data['charge']:.6f} {data['atom_type']} {pdb_name}\n")
                     else:
                         print(f"Warning: No charge found for atom ID {atom_id}")
             
@@ -930,6 +1133,22 @@ def extract_qm_charges(ref_pdb, mol2_file, residue_name_mapping=None):
 #Only includes residues that were originally standard residues (like HID, CYS, etc.)
 def generate_easyparm_residues(residue_name_mapping, output_file="easyPARM_residues.dat", output_file2="ALL_RESIDUE_tleap.input"):
 
+    """
+    Generate configuration files listing renamed standard residues for downstream processing.
+    
+    Creates two files:
+    1. easyPARM_residues.dat — lists each renamed residue in format:
+       "HI1.pdb HI1.mol2 HI1" (used by the bash script to run antechamber on each)
+    2. ALL_RESIDUE_tleap.input — tleap script to load all renamed residue mol2 files
+       and save them to COMPLEX.lib
+    
+    Only includes residues that were originally standard amino acids (HID, CYS, ASP, etc.).
+    
+    Args:
+        residue_name_mapping (dict): {(resname, chain, resnum): new_name} mapping.
+        output_file (str): Path for easyPARM_residues.dat output.
+        output_file2 (str): Path for ALL_RESIDUE_tleap.input output.
+    """
     try:
         # Define standard residues
         standard_residues = {
@@ -976,6 +1195,22 @@ def generate_easyparm_residues(residue_name_mapping, output_file="easyPARM_resid
 
 #Generate a PDB file containing all residues except those in part_QM.pdb
 def generate_easyPARM_nonstand_pdb(input_pdb, part_qm_pdb, output_pdb="easynonstands.pdb"):
+    """
+    Generate an alternative nonstand PDB using coordinate-based exclusion.
+    
+    Similar to generate_nonstand_pdb() but excludes atoms by matching their
+    XYZ coordinates (rounded to 3 decimals) against part_QM.pdb, rather than
+    by residue number. This is more robust when atom numbering differs between
+    the protein PDB and the QM extraction.
+    
+    Output (easynonstands.pdb) is used later when assembling the final system
+    with pdb4amber.
+    
+    Args:
+        input_pdb (str): Path to metalloprotein_easyPARM.pdb (full protein).
+        part_qm_pdb (str): Path to part_QM.pdb (atoms to exclude by coordinates).
+        output_pdb (str): Output path (default: easynonstands.pdb).
+    """
     try:
         # Build exclude set from coordinates in part_qm_pdb
         # Coordinates are the only reliable common field between the two file formats
@@ -1017,6 +1252,21 @@ def generate_easyPARM_nonstand_pdb(input_pdb, part_qm_pdb, output_pdb="easynonst
         raise
 
 def main():
+    """
+    Main entry point for metalloprotein.py.
+    
+    Orchestrates the full metalloprotein processing workflow:
+    1. analyze_and_extract_metal_site() — identify metals, extract coordination shell
+    2. update_mol2_with_qm_types() — create COMPLEX_updated.mol2 with hybrid atom types
+    3. extract_non_standard_residues_from_ref() — split into metal part + standard residues
+    4. generate_nonstand_pdb() — create protein PDB with metal region removed
+    5. extract_qm_charges() — extract per-residue charges from MOL2
+    6. generate_easyparm_residues() — write config files for bash script
+    7. generate_easyPARM_nonstand_pdb() — coordinate-based exclusion PDB
+    
+    Command-line usage:
+        python3 metalloprotein.py <path_to_ff_library.lib>
+    """
     try:
         # Check if library file argument is provided
         if len(sys.argv) < 2:
