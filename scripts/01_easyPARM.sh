@@ -432,34 +432,8 @@ for script in 03_correct_mol2.py correct_atom_type.py 04_parmch2_frcmod.sh; do
     fi
 done
 
-echo " "
+echo "Done creating COMPLEX.mol2 file with assigned atom types and charges."
 
-# Function to process metallonucleic with selected force field
-process_metallonucleic() {
-    local nucleic_ff=$1
-    
-    if [ ! -f "$SCRIPT_DIR/metallonucleic.py" ]; then
-        echo "Error: metallonucleic.py not found in $SCRIPT_DIR" >&2
-        return 1
-    fi
-    
-    case "$nucleic_ff" in
-        1) lib_file="DNA_BSC0.lib" ;;
-        2) lib_file="DNA_BSC1.lib" ;;
-        3) lib_file="DNA_OL15.lib" ;;
-        4) lib_file="DNA_OL21.lib" ;;
-        5) lib_file="DNA_OL24.lib" ;;
-        6) lib_file="RNA_OL3.lib" ;;
-        *) 
-            echo "Error: Invalid nucleic force field selection: $nucleic_ff" >&2
-            echo "Valid options are 1-6" >&2
-            return 1
-            ;;
-    esac
-    
-    python3 "$SCRIPT_DIR/metallonucleic.py" "$SCRIPT_DIR/libraries/$lib_file"
-    mv "$RUN_DIR/COMPLEX_updated.mol2" "$RUN_DIR/easyCOMPLEX.mol2"
-}
 
 # Function to process metalloprotein with selected force field
 process_metalloprotein() {
@@ -488,9 +462,8 @@ process_metalloprotein() {
 
 metalloprotein_choice=$(get_valid_input "Does your structure belong to MetalloProtein ? (y/n): " "y n yes no Y N YES NO Yes No")
 echo " "
-metallonucleic_choice=$(get_valid_input "Does your structure belong to Metallonucleic acid ? (y/n): " "y n yes no Y N YES NO Yes No")
 
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 
     echo " "
     while true; do
@@ -533,51 +506,14 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 		fi
     	fi
     	
-	if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-		read -p "Please provide the metallonucleic acid pdb file: " nucleic_pdb
-	        echo " "
-		echo "======================================================"
-		echo "        DNA/RNA Force Field Integration Menu"
-		echo "======================================================"
-		echo "Select the DNA/RNA FF to be used for the metal-coordinated standard nucleobase residues"
-		echo " "
-		echo "1- DNA-BSC0"
-		echo "2- DNA-BSC1"
-		echo "3- DNA-OL15"
-		echo "4- DNA-OL21"
-		echo "5- DNA-OL24"
-		echo "6- RNA-OL3"
-		echo " "
-		nucleic_ff=$(get_valid_input "Enter your choice: " "1 2 3 4 5 6")
-		if [ ! -f "$RUN_DIR/$nucleic_pdb" ]; then
-		    echo "Metallonucleic acid file not found in $RUN_DIR. Please check the file name and try again."
-		    continue
-		fi
-
-		pdb4amber -i "$RUN_DIR/$nucleic_pdb" -o "$RUN_DIR/nucleic_acid_easyPARM.pdb"  > "$RUN_DIR/temp.dat" 2>&1 
-		if [ -f "$SCRIPT_DIR/metallonucleic.py" ]; then
-			process_metallonucleic "$nucleic_ff" 
-		else
-			echo "Script metallonucleic.py not found in $SCRIPT_DIR. Exiting."
-			exit 1
-		fi
-
-		# Check if the script was successful
-		if [ $? -ne 0 ]; then
-			echo "Failed to execute metallonucleic.py. Exiting."
-			exit 1
-		fi
-    	fi
-    	
+	
 	mv "$RUN_DIR/easyCOMPLEX.mol2" "$RUN_DIR/COMPLEX_modified.mol2" 
     	
     	if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 	python3 "$SCRIPT_DIR/distribute_metalloprotein_charge.py" "$RUN_DIR/$protein_pdb" "$RUN_DIR/COMPLEX_modified.mol2" $charge_total 
 	fi 
     	
-	if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-	python3 "$SCRIPT_DIR/distribute_metallonucleic_charge.py" "$RUN_DIR/$nucleic_pdb" "$RUN_DIR/COMPLEX_modified.mol2" $charge_total 
-	fi 
+
     	
 	mv "$RUN_DIR/updated_easy_COMPLEX.mol2" "$RUN_DIR/COMPLEX_modified.mol2" 
     	break
@@ -626,7 +562,7 @@ fi
 
 
 echo " "
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 
 	cp "$RUN_DIR/COMPLEX.mol2" "$RUN_DIR/1COMPLEX.mol2"
 	if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
@@ -644,20 +580,6 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 		fi
 	fi
 
-	if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-		if [ -f "$SCRIPT_DIR/metallonucleic.py" ]; then
-			process_metallonucleic "$nucleic_ff"
-		else
-			echo "Script metallonucleic.py not found in $SCRIPT_DIR. Exiting."
-			exit 1
-		fi
-
-		# Check if the script was successful
-		if [ $? -ne 0 ]; then
-			echo "Failed to execute metallonucleic.py. Exiting."
-			exit 1
-		fi
-	fi
 
 	python3 "$SCRIPT_DIR/xyz_to_pdb.py" "$RUN_DIR/part_QM.xyz" "$RUN_DIR/part_QM.pdb"
 	python3 "$SCRIPT_DIR/xyz_to_pdb.py" "$RUN_DIR/qm.xyz" "$RUN_DIR/qm.pdb"
@@ -718,9 +640,7 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 		python3 "$SCRIPT_DIR/update_metalloprotein_charge.py" > "$RUN_DIR/temp.dat" 2>&1
 	fi 
     	
-	if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-		python3 "$SCRIPT_DIR/update_metalnucleicacid_charge.py" > "$RUN_DIR/temp.dat" 2>&1
-	fi 
+
     	cp "$RUN_DIR/QM.mol2" "$RUN_DIR/COMPLEX.mol2"
     	python3 "$SCRIPT_DIR/02_get_bond_angle.py" "$RUN_DIR/qm.xyz"
     	python3 "$SCRIPT_DIR/03_correct_mol2.py" 
@@ -777,38 +697,14 @@ process_metalloprotein_parm() {
     python3 "$SCRIPT_DIR/metalloprotein_parm.py" "$SCRIPT_DIR/libraries/$frcmod_file" > "$RUN_DIR/temp.dat" 2>&1
 }
 
-# Function to process metallonucleic parameters (frcmod)
-process_metallonucleic_parm() {
-    local nucleic_ff=$1
-    
-    if [ ! -f "$SCRIPT_DIR/metalloprotein_parm.py" ]; then
-        echo "Error: metalloprotein_parm.py not found in $SCRIPT_DIR" >&2
-        return 1
-    fi
-    
-    case "$nucleic_ff" in
-        1) frcmod_file="DNA_BSC0.frcmod" ;;
-        2) frcmod_file="DNA_BSC1.frcmod" ;;
-        3) frcmod_file="DNA_OL15.frcmod" ;;
-        4) frcmod_file="DNA_OL21.frcmod" ;;
-        5) frcmod_file="DNA_OL24.frcmod" ;;
-        6) frcmod_file="RNA_OL3.frcmod" ;;
-        *) 
-            echo "Error: Invalid nucleic force field selection: $nucleic_ff" >&2
-            echo "Valid options are 1-6" >&2
-            return 1
-            ;;
-    esac
-    
-    python3 "$SCRIPT_DIR/metalloprotein_parm.py" "$SCRIPT_DIR/libraries/$frcmod_file" > "$RUN_DIR/temp.dat" 2>&1
-}
+
 
 resid_ID=$(get_valid_input "Would you like to change the residue ID (Default= mol)? (y/n): " "y n yes no Y N YES NO Yes No")
 if [[ "${resid_ID,,}" =~ ^(y|yes)$ ]]; then
     read -r -p "Please provide the residue name: " resid_name
 fi
 
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 
     
     if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
@@ -817,13 +713,7 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 	    pdb4amber -i "$RUN_DIR/easyPARM_MetalloProtein.pdb" -o "$RUN_DIR/easyPARM_MetalloProtein2.pdb"  > "$RUN_DIR/temp.dat" 2>&1 
 	    mv "$RUN_DIR/easyPARM_MetalloProtein2.pdb" "$RUN_DIR/easyPARM_MetalloProtein.pdb" 
     fi
-    if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-	    process_metallonucleic_parm "$nucleic_ff" 
 
-	    mv "$RUN_DIR/nonstand.pdb" "$RUN_DIR/easyPARM_MetalloNucleic.pdb"
-	    pdb4amber -i "$RUN_DIR/easyPARM_MetalloNucleic.pdb" -o "$RUN_DIR/easyPARM_MetalloNucleic2.pdb"  > "$RUN_DIR/temp.dat" 2>&1 
-	    mv "$RUN_DIR/easyPARM_MetalloNucleic2.pdb" "$RUN_DIR/easyPARM_MetalloNucleic.pdb" 
-    fi 
     
     mv "$RUN_DIR/QM.mol2" "$RUN_DIR/METAL.mol2"
     mv "$RUN_DIR/coordinated_residues.txt" "$RUN_DIR/Bond_Info.dat"
@@ -857,10 +747,7 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 		    mv "$RUN_DIR/easyPARM_MetalloProtein.pdb" "$RUN_DIR/easyPARM_MetalloProtein_${resid_name}.pdb"
 		    sed -i'' "s/\<mol\>/${resid_name}/g" "$RUN_DIR/easyPARM_MetalloProtein_${resid_name}.pdb"
 	    fi
-	    if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-	    	mv "$RUN_DIR/easyPARM_MetalloNucleic.pdb" "$RUN_DIR/easyPARM_MetalloNucleic_${resid_name}.pdb"
-		sed -i'' "s/\<mol\>/${resid_name}/g" "$RUN_DIR/easyPARM_MetalloNucleic_${resid_name}.pdb"
-	    fi
+
 	    cp "$RUN_DIR/METAL.mol2" "$RUN_DIR/${resid_name}.mol2"
 	    sed -i'' "s/\<mol\>/${resid_name}/g" "$RUN_DIR/${resid_name}.mol2"
 
@@ -872,9 +759,6 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 	    echo "Tleap Input   		  : Tleap.input"
 	    if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 		    echo "MetalloProtein pdb        : easyPARM_MetalloProtein_${resid_name}.pdb"
-	    fi
-	    if [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
-		    echo "MetalloProtein pdb        : easyPARM_MetalloNucleic_${resid_name}.pdb"
 	    fi
     else
 	    echo "Mol2                      : METAL.mol2"
@@ -905,7 +789,8 @@ else
 
 fi	
 
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
+
         # run for only the small residue 
 	python3 "$SCRIPT_DIR/02_get_bond_angle.py" "$RUN_DIR/part_QM.xyz"
 
@@ -945,8 +830,6 @@ if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choic
 	echo "# Modify the system force field to your preferred version; for example, use ff14SB instead of ff19SB." >> tleap.input
 	if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] ; then
 		echo "source leaprc.protein.ff19SB " >> tleap.input
-	elif [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]] ; then
-		echo "source leaprc.DNA.OL24 " >> tleap.input
 	fi
 
         echo " " >> tleap.input
@@ -1047,11 +930,10 @@ if [[ "${charmm_FF,,}" =~ ^(y|yes)$ ]] && [[ "${metalloprotein_choice,,}" =~ ^(n
 fi
 
 
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
 	rm -f COMPLEX.mol2
 	rm -f COMPLEX.pdb	
 	rm -f metalloprotein_easyPARM_*
-	rm -f metallonucleic_easyPARM_*
 	rm -f *_renum.txt
 	rm -f *_sslink
 	rm -f *_nonprot.pdb
@@ -1119,7 +1001,7 @@ check_force_constants() {
 }
 
 # Main logic
-if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]] || [[ "${metallonucleic_choice,,}" =~ ^(y|yes)$ ]]; then
+if [[ "${metalloprotein_choice,,}" =~ ^(y|yes)$ ]]; then
     if [[ "${resid_ID,,}" =~ ^(y|yes)$ ]]; then
         frcmod_file="$RUN_DIR/COMPLEX_${resid_name}.frcmod"
     else
